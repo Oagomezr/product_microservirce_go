@@ -38,6 +38,10 @@ func (s *UpdateProduct) Execute(ctx context.Context, productPatch *model.Product
 		return appErrors.Validation("at least one field is required")
 	}
 
+	if err := productPatch.Validate(); err != nil {
+		return appErrors.Validation(err.Error())
+	}
+
 	// 2. check if the product exists
 	exists, err := s.checker.Exist(ctx, productPatch.ID)
 	if err != nil {

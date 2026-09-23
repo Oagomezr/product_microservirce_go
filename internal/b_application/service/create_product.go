@@ -7,7 +7,6 @@ import (
 	appErrors "product-microservice/internal/b_application/app_errors"
 	"product-microservice/internal/b_application/port/out"
 
-	"strings"
 	"time"
 
 	"encoding/json"
@@ -42,8 +41,8 @@ func (s *CreateProduct) Execute(ctx context.Context, product *model.Product) (uu
 	}
 
 	// 2. validate the product
-	if err := s.validateProduct(product); err != nil {
-		return uuid.Nil, err
+	if err := product.Validate(); err != nil {
+		return uuid.Nil, appErrors.Validation(err.Error())
 	}
 
 	// 3. begin the transaction
@@ -89,34 +88,4 @@ func (s *CreateProduct) Execute(ctx context.Context, product *model.Product) (uu
 	}
 
 	return product.ID, nil
-}
-
-func (s *CreateProduct) validateProduct(product *model.Product) error {
-	// 1. validate the product
-	concatErrors := strings.Builder{}
-	if s.convertTrim(product.Name) == "" {
-		concatErrors.WriteString("name is required\n")
-	}
-	if s.convertTrim(product.Description) == "" {
-		concatErrors.WriteString("description is required\n")
-	}
-	if s.convertTrim(product.ShortDescription) == "" {
-		concatErrors.WriteString("short description is required\n")
-	}
-	if product.Price <= 0 {
-		concatErrors.WriteString("price is required\n")
-	}
-	if product.Stock <= 0 {
-		concatErrors.WriteString("stock must be greater than 0\n")
-	}
-
-	if concatErrors.Len() > 0 {
-		return appErrors.Validation(concatErrors.String())
-	}
-
-	return nil
-}
-
-func (s *CreateProduct) convertTrim(name string) string {
-	return strings.TrimSpace(name)
 }

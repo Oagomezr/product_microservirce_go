@@ -1,6 +1,9 @@
 package model
 
 import (
+	"errors"
+	"strings"
+
 	"github.com/google/uuid"
 )
 
@@ -25,4 +28,30 @@ func (p *ProductPatch) IsEmpty() bool {
 		p.Hidden == nil &&
 		p.ImagesURLs == nil &&
 		p.CategoryID == nil
+}
+
+func (p *ProductPatch) Validate() error {
+	concatErrors := strings.Builder{}
+	if p.Name != nil && strings.TrimSpace(*p.Name) == "" {
+		concatErrors.WriteString("name is required\n")
+	}
+	if p.Price != nil && *p.Price <= 0 {
+		concatErrors.WriteString("price must be greater than 0\n")
+	}
+	if p.Description != nil && strings.TrimSpace(*p.Description) == "" {
+		concatErrors.WriteString("description is required\n")
+	}
+	if p.ShortDescription != nil && strings.TrimSpace(*p.ShortDescription) == "" {
+		concatErrors.WriteString("short description is required\n")
+	}
+	if p.ImagesURLs != nil && len(*p.ImagesURLs) == 0 {
+		concatErrors.WriteString("images URLs are required\n")
+	}
+	if p.CategoryID != nil && *p.CategoryID == uuid.Nil {
+		concatErrors.WriteString("category ID is required\n")
+	}
+	if concatErrors.Len() > 0 {
+		return errors.New(concatErrors.String())
+	}
+	return nil
 }
