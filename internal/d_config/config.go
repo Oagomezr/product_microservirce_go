@@ -34,11 +34,19 @@ func Load() Config {
 	pgSSL := getenv("POSTGRES_SSLMODE", "disable")
 
 	// MongoDB configuration
-	mongoHost := getenv("MONGO_HOST", "localhost")
-	mongoPort := getenv("MONGO_PORT", "27017")
-	mongoUser := getenv("MONGO_USER", "product_service")
-	mongoPass := getenv("MONGO_PASSWORD", "mongo")
+	// Prefer a full URI (Atlas download / MONGODB_URI). Otherwise build from parts.
 	mongoDB := getenv("MONGO_DATABASE", "query_product_db")
+	mongoURIStr := firstNonEmpty(
+		os.Getenv("MONGODB_URI"),
+		os.Getenv("MONGO_URI"),
+	)
+	if mongoURIStr == "" {
+		mongoHost := getenv("MONGO_HOST", "localhost")
+		mongoPort := getenv("MONGO_PORT", "27017")
+		mongoUser := getenv("MONGO_USER", "product_service")
+		mongoPass := getenv("MONGO_PASSWORD", "mongo")
+		mongoURIStr = buildMongoURI(mongoHost, mongoPort, mongoUser, mongoPass)
+	}
 
 	// Kafka configuration
 	kafkaBrokers := getenv("KAFKA_BROKERS", "localhost:9092")
@@ -51,7 +59,7 @@ func Load() Config {
 			"host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
 			pgHost, pgPort, pgUser, pgPass, pgDB, pgSSL,
 		),
-		MongoURI:           mongoURI(mongoHost, mongoPort, mongoUser, mongoPass),
+		MongoURI:           mongoURIStr,
 		MongoDatabase:      mongoDB,
 		KafkaBrokers:       strings.Split(kafkaBrokers, ","),
 		KafkaConsumerGroup: kafkaConsumerGroup,
@@ -59,16 +67,42 @@ func Load() Config {
 	}
 }
 
-// mongoURI constructs a MongoDB URI with authentication.
-func mongoURI(host, port, user, pass string) string {
+// buildMongoURI constructs a MongoDB URI with authentication.
+// Atlas hosts (*.mongodb.net) use mongodb+srv (TLS, no port). Local Docker uses mongodb://host:port.
+func buildMongoURI(host, port, user, pass string) string {
+	query := url.Values{}
+	query.Set("authSource", "admin")
+
+	if strings.Contains(host, "mongodb.net") {
+		query.Set("retryWrites", "true")
+		query.Set("w", "majority")
+		u := &url.URL{
+			Scheme:   "mongodb+srv",
+			User:     url.UserPassword(user, pass),
+			Host:     host,
+			Path:     "/",
+			RawQuery: query.Encode(),
+		}
+		return u.String()
+	}
+
 	u := &url.URL{
 		Scheme:   "mongodb",
 		User:     url.UserPassword(user, pass),
 		Host:     fmt.Sprintf("%s:%s", host, port),
 		Path:     "/",
-		RawQuery: "authSource=admin",
+		RawQuery: query.Encode(),
 	}
 	return u.String()
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
 }
 
 // getenv gets an environment variable with a fallback.

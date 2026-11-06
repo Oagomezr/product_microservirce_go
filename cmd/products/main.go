@@ -99,7 +99,7 @@ func main() {
 	// consume the events
 	go consumeProductH.ConsumeProductEvent(appCtx)
 
-	// publish the outbox events
+	// publish the outbox events (short timeout so a missing Kafka does not hang the relay forever)
 	go func() {
 		ticker := time.NewTicker(10 * time.Second)
 		defer ticker.Stop()
@@ -109,9 +109,11 @@ func main() {
 			case <-appCtx.Done():
 				return
 			case <-ticker.C:
-				err := publishOutboxUC.Execute(appCtx, 50)
+				relayCtx, cancel := context.WithTimeout(appCtx, 10*time.Second)
+				err := publishOutboxUC.Execute(relayCtx, 50)
+				cancel()
 				if err != nil {
-					log.Printf("failed to publish outbox: %v", err)
+					log.Printf("outbox relay: tick failed: %v", err)
 				}
 			}
 		}

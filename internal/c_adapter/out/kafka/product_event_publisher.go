@@ -23,6 +23,9 @@ func NewProductEventPublisher(brokerURL []string, topic string) (*ProductEventPu
 	cl, err := kgo.NewClient(
 		kgo.SeedBrokers(brokerURL...),
 		kgo.DefaultProduceTopic(topic),
+		// Fail produce attempts quickly when the broker is down (e.g. lab without Kafka).
+		kgo.RecordDeliveryTimeout(8*time.Second),
+		kgo.ProduceRequestTimeout(5*time.Second),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Kafka client: %w", err)

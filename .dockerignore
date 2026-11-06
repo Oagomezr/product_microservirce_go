@@ -1,0 +1,30 @@
+# Secrets and local env (never bake into the image)
+.env
+.env.*
+!.env.example
+
+# Git and CI (not needed to compile the binary)
+.git
+.github
+
+# Editor / tooling
+.cursor
+.vscode
+*.md
+
+# Local infra definitions (Postgres init stays for compose, not for the Go image)
+docker-compose.yml
+docker/
+
+# Tests (optional: smaller build context; Dockerfile should not rely on test files)
+**/*_test.go
+
+# Go build artifacts on Windows/macOS/Linux
+*.exe
+*.dll
+*.so
+*.dylib
+
+# If you ever run `go mod vendor`, prefer `go mod download` in Dockerfile instead.
+# Uncomment the next line only if you do NOT copy vendor/ in your Dockerfile:
+# vendor/

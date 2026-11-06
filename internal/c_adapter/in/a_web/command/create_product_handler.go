@@ -46,10 +46,11 @@ func (h *CreateProductHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	// 4. trigger the use case
 	productID, err := h.creatorUserCase.Execute(ctx, &productDomain)
 	if err != nil {
-		log.Printf("create product: %v", err)
+		log.Printf("create product: failed: %v", err)
 		httpErrors.CustomError(w, err)
 		return
 	}
+	log.Printf("create product: ok id=%s name=%q", productID, productDomain.Name)
 
 	// 5. Return the response (HTTP 201 Created)
 	w.Header().Set("Content-Type", "application/json")

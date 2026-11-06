@@ -303,15 +303,118 @@ Test doubles (stubs) implement the same interfaces as real adapters (`ProductSav
 ```text
 product_microservice/
 ├── cmd/products/           # main, wiring
+├── deploy/aws/             # optional Kafka compose for EC2 experiments
 ├── docker/postgres/        # init.sql
 ├── internal/
 │   ├── a_domain/model/     # domain + product_patch_test.go
 │   ├── b_application/      # services + *_test.go
 │   └── c_adapter/          # http, kafka, postgres, mongo
 ├── docker-compose.yml
+├── Dockerfile
 ├── .env.example
 └── README.md
 ```
+
+---
+
+## AWS lab deployment
+
+Hands-on deploy of this service on AWS (learning / portfolio). Region used: **`us-east-1`**.
+
+### What was deployed
+
+```text
+Internet
+   │
+   ▼
+ECS Fargate task  (image from ECR: study/products)
+   │  env: POSTGRES_*, MONGO_*, KAFKA_*
+   │
+   ├──► Amazon RDS PostgreSQL  (write model + outbox)
+   ├──► MongoDB Atlas M0       (read model; DocumentDB not available on Free Plan)
+   └──► Kafka                  (full bus on local Compose only — see below)
+```
+
+| Component | Service | Notes |
+|-----------|---------|--------|
+| Container image | **ECR** `study/products` | Multi-stage Dockerfile; push `:latest` |
+| Runtime | **ECS Fargate** cluster `study-products`, service `products-api-service` | Task def `products-api`, port **8080**, public IP for lab |
+| Write DB | **RDS** PostgreSQL `rds-study` (`db.t4g.micro`) | Schema from `docker/postgres/init.sql` (`products`, `outbox`) |
+| Read DB | **MongoDB Atlas** (M0 Free) | DB `query_product_db`, collection `products` |
+| Logs | **CloudWatch** `/ecs/products-api` | Create + outbox relay logs |
+| Network | Default VPC + security groups | See below |
+
+### Security groups (lab)
+
+| SG | Purpose |
+|----|---------|
+| `ecs-products-sg` | Inbound **8080** from `0.0.0.0/0` (lab); outbound all (RDS, Atlas, ECR) |
+| `rds-study-sg` | Inbound **5432** from **My IP** (DBeaver) and from **`ecs-products-sg`** (Fargate) |
+
+> Dynamic home IPs: if DBeaver times out after a few days, refresh **My IP** on `rds-study-sg`.
+
+RDS must be **Publicly accessible = Yes** to connect from a laptop; Fargate reaches RDS over the VPC using the SG rule sourced from `ecs-products-sg`.
+
+### MongoDB / Atlas
+
+- App builds `mongodb+srv://...` when `MONGO_HOST` ends with `mongodb.net` (see `internal/d_config`).
+- Optional: set full `MONGODB_URI` from Atlas.
+- Atlas **Network Access**: allow lab traffic (e.g. `0.0.0.0/0` for study only).
+- **Amazon DocumentDB** was attempted but blocked on this account’s Free Plan (“subscription / engine not available”); Atlas was used instead and documented as such.
+
+### Verified behaviour on AWS
+
+| Check | Result |
+|-------|--------|
+| `GET /health` | **200** when RDS + Atlas reachable |
+| `POST /products` | **201** + row in RDS `products` + `outbox` (`published = false` until Kafka works) |
+| CloudWatch | `create product: ok ...`, `outbox relay: tick, unpublished=N`, Kafka dial errors to `127.0.0.1:9092` when brokers still point to localhost |
+| `GET /products/{id}` | Needs Mongo projection → requires Kafka (see gaps) |
+
+### Kafka on AWS (explicitly out of scope for this lab)
+
+Full outbox → Kafka → Mongo was validated **locally** with Docker Compose.
+
+On AWS, `KAFKA_BROKERS=localhost:9092` inside Fargate fails (`connection refused` / deadline exceeded) because there is no broker in the task. Options considered:
+
+| Option | Decision |
+|--------|----------|
+| **Amazon MSK** | Best fit with Fargate; skipped for **cost** / Free Plan |
+| EC2 + Docker Kafka | Works, but hybrid “Fargate app + pet EC2 broker” is not the target architecture for this lab |
+| Document & stop | **Chosen** — document the gap; keep local Compose for the full event path |
+
+A compose file for a future Kafka-on-EC2 experiment (not required) lives at `deploy/aws/docker-compose.kafka.yml`.
+
+### Build & push image
+
+```bash
+aws ecr get-login-password --region us-east-1 \
+  | docker login --username AWS --password-stdin <ACCOUNT>.dkr.ecr.us-east-1.amazonaws.com
+
+docker build -t study/products .
+docker tag study/products:latest <ACCOUNT>.dkr.ecr.us-east-1.amazonaws.com/study/products:latest
+docker push <ACCOUNT>.dkr.ecr.us-east-1.amazonaws.com/study/products:latest
+```
+
+After push: create a **new task definition revision** pointing at `:latest` (avoid pinning an old `@sha256:...` digest), then **Update service** to that revision (Force new deployment).
+
+### Cost control
+
+| Action | Effect |
+|--------|--------|
+| ECS service **Desired tasks = 0** | Stops Fargate compute (stopping a single task is not enough if desired stays 1) |
+| RDS **Stop** | Pauses most instance charges (auto-restarts after ~7 days unless deleted) |
+| Atlas M0 | Free tier |
+| ECR + CloudWatch | Small storage/log cost |
+
+Do **not** leave Desired = 1 and RDS Available 24/7 unless you intend to pay.
+
+### Lessons learned (interview-ready)
+
+1. **Security groups are source-based** — attaching `ecs-products-sg` to RDS does not open 5432; you need inbound **5432 ← ecs-products-sg**.
+2. **Task definition digests** — Force new deployment alone does not pick up a new image if the revision pins an old digest.
+3. **Outbox without a broker** — writes stay safe in Postgres; projection waits; relay logs make the failure visible.
+4. **Managed vs pet VMs** — prefer MSK (or SQS later) over a random EC2 Kafka if aligning with AWS practices; skip if cost blocks the lab.
 
 ---
 
@@ -322,7 +425,8 @@ product_microservice/
 - [x] Unit tests (services, domain, handler)
 - [ ] Integration tests (Postgres/Mongo testcontainers)
 - [x] GitHub Actions (build + test)
-- [ ] Cloud deployment
+- [x] AWS lab (ECR, ECS Fargate, RDS, Atlas, CloudWatch) — Kafka on AWS deferred (cost)
+- [ ] Optional: Amazon MSK or SQS adapter for cloud event bus
 
 ---
 
